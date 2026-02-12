@@ -1,0 +1,11 @@
+# Core dependencies - use pyproject.toml for installation
+# Install with: pip install -e .
+
+# This file is kept for backward compatibility
+# All dependencies are now managed in pyproject.toml
+
+# Additional FastAPI dependencies not in pyproject.toml
+jinja2>=3.1.0
+python-multipart>=0.0.6
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4

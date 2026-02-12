@@ -1,16 +1,16 @@
-import streamlit as st
-from streamlit_option_menu import option_menu
-import streamlit.components.v1 as html
-from  PIL import Image
+import os
 import base64
-import numpy as np
-#from  PIL import ImageChops
-import pandas as pd
-from st_aggrid import AgGrid
-import plotly.express as px
-import io 
-import sqlite3 
 import hashlib
+import sqlite3
+from typing import List, Optional, Tuple, Any
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+from PIL import Image
+from st_aggrid import AgGrid
+from streamlit_option_menu import option_menu
 import streamlit.components.v1 as components
 
 from spotipy_client import *
@@ -21,47 +21,78 @@ from spotipy_client import *
 cwd = os.getcwd()
 
 
-def make_hashes(password):
-	return hashlib.sha256(str.encode(password)).hexdigest()
+def make_hashes(password: str) -> str:
+    """Generate SHA256 hash for password."""
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def check_hashes(password,hashed_text):
-	if make_hashes(password) == hashed_text:
-		return hashed_text
-	return False
+def check_hashes(password: str, hashed_text: str) -> str | bool:
+    """Verify password against hash."""
+    if make_hashes(password) == hashed_text:
+        return hashed_text
+    return False
 
 
-cols = ['Username', 'Password', 'Count', 'Timestamp', 'loved_it', 'like_it', 'okay', 'hate_it', 'recently_searched_song', 'email_id', 'rec_song_uri']
-lst = []
-def add_userdata(username,password,count,time, loved_it, like_it, okay, hate_it, recently_searched_song, email_id, rec_song_uri):
-    lst.append([username,password,count,time, loved_it, like_it, okay, hate_it, recently_searched_song, email_id, rec_song_uri])
-    path = 'new.csv'
+COLUMNS = ['Username', 'Password', 'Count', 'Timestamp', 'loved_it', 'like_it', 'okay', 'hate_it', 'recently_searched_song', 'email_id', 'rec_song_uri']
+CSV_PATH = 'new.csv'
 
-    # Check whether the specified path exists or not
-    isExist = os.path.exists(path)
-
-    if not isExist:
-        df = pd.DataFrame(lst, columns = cols)
-        df.to_csv("new.csv", index = False)
-    else:
-        df = pd.read_csv("new.csv")
-        df = df.append(pd.DataFrame(lst, columns = cols), ignore_index=True)
-        df.to_csv("new.csv", index = False)
-    print(df)
-    return df
+def add_userdata(
+    username: str,
+    password: str,
+    count: int,
+    time: str,
+    loved_it: str,
+    like_it: str,
+    okay: str,
+    hate_it: str,
+    recently_searched_song: str,
+    email_id: str,
+    rec_song_uri: str
+) -> pd.DataFrame:
+    """Add user data to CSV file with proper error handling."""
+    user_data = [[username, password, count, time, loved_it, like_it, okay, hate_it, recently_searched_song, email_id, rec_song_uri]]
+    
+    try:
+        if not os.path.exists(CSV_PATH):
+            df = pd.DataFrame(user_data, columns=COLUMNS)
+        else:
+            df = pd.read_csv(CSV_PATH)
+            new_row = pd.DataFrame(user_data, columns=COLUMNS)
+            df = pd.concat([df, new_row], ignore_index=True)
+        
+        df.to_csv(CSV_PATH, index=False)
+        print(df)
+        return df
+    except Exception as e:
+        st.error(f"Error saving user data: {e}")
+        raise
     
 # def add_userdata(username,password,count):
 #     df = pd.dataframe(['username', 'password', count], columns = ['username', 'password', 'count'])
     
-def login_user(username, password):
-    a = pd.read_csv("new.csv")
-    b = a.loc[(a['Username'] == username) & (a['Password'] == password)]
-    print(b)
-    c = b.to_numpy()
-    return c
+def login_user(username: str, password: str) -> np.ndarray:
+    """Authenticate user and return user data."""
+    try:
+        df = pd.read_csv(CSV_PATH)
+        user_data = df.loc[(df['Username'] == username) & (df['Password'] == password)]
+        print(user_data)
+        return user_data.to_numpy()
+    except FileNotFoundError:
+        st.error("User database not found")
+        return np.array([])
+    except Exception as e:
+        st.error(f"Error during login: {e}")
+        return np.array([])
 
-def view_all_users():
-    a = pd.read_csv("new.csv")
-    return a
+def view_all_users() -> pd.DataFrame:
+    """View all users from database."""
+    try:
+        return pd.read_csv(CSV_PATH)
+    except FileNotFoundError:
+        st.warning("No users found")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error reading users: {e}")
+        return pd.DataFrame()
 
 # def update_count(username):
 #     a = pd.read_csv("new.csv")
@@ -69,10 +100,18 @@ def view_all_users():
 #     a.loc[cond,'Count'] = a['Count'] - 1
 #     a.to_csv("new.csv", index = False)
     
-def read_count(username):
-    a = pd.read_csv("new.csv")
-    c =a.loc[a['Username'] == username, 'Count'].iloc[0]
-    return c
+def read_count(username: str) -> int:
+    """Read user's remaining count."""
+    try:
+        df = pd.read_csv(CSV_PATH)
+        count = df.loc[df['Username'] == username, 'Count'].iloc[0]
+        return int(count)
+    except (FileNotFoundError, IndexError):
+        st.error("User not found or no count available")
+        return 0
+    except Exception as e:
+        st.error(f"Error reading count: {e}")
+        return 0
 #st.set_page_config(page_title="Sharone's Streamlit App Gallery", page_icon="", layout="wide")
 
 # sysmenu = '''

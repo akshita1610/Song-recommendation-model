@@ -3,21 +3,26 @@ import re
 import sys
 import json
 import pprint
-import pandas as pd
-import sqlite3
-from sqlite3 import Error
-import multiprocessing as mp
-from tqdm import tqdm
-from datetime import datetime
-from zipfile import ZipFile
 import fnmatch
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
+from zipfile import ZipFile
+
+import multiprocessing as mp
+import pandas as pd
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from tqdm import tqdm
+import sqlite3
+from sqlite3 import Error
 
 pd.set_option('display.max_rows', None)
-zip_file = 'data/spotify_million_playlist_dataset.zip'
-db_file = 'data/spotify_million_playlists.db'
-log_file = 'data/read_spotify_mpd_log.txt'
+
+# Constants
+ZIP_FILE = Path('data/spotify_million_playlist_dataset.zip')
+DB_FILE = Path('data/spotify_million_playlists.db')
+LOG_FILE = Path('data/read_spotify_mpd_log.txt')
 
 sys.path.insert(1, os.getcwd())
 import config
@@ -26,38 +31,51 @@ os.environ["SPOTIPY_CLIENT_ID"] = config.SPOTIPY_CLIENT_ID
 os.environ["SPOTIPY_CLIENT_SECRET"] = config.SPOTIPY_CLIENT_SECRET
 os.environ['SPOTIPY_REDIRECT_URI'] = config.SPOTIPY_REDIRECT_URI
 
-def write_log(text):
-    with open(log_file, 'a') as lf:
-        lf.write(str(text) + '\n')
+def write_log(text: Any) -> None:
+    """Write log entry to file with timestamp."""
+    timestamp = datetime.now().isoformat()
+    with open(LOG_FILE, 'a', encoding='utf-8') as lf:
+        lf.write(f"[{timestamp}] {text}\n")
 
-def create_connection(db_file):
-    """ create a database connection to the SQLite database specified by db_file
-    :param db_file: database file
-    :return: Connection object or None
+def create_connection(db_file: Path) -> Optional[sqlite3.Connection]:
+    """Create a database connection to the SQLite database.
+    
+    Args:
+        db_file: Path to database file
+        
+    Returns:
+        Connection object or None
     """
     conn = None
     try:
-        conn = sqlite3.connect(db_file)
-        write_log('Connection to ' + db_file)
+        conn = sqlite3.connect(str(db_file))
+        write_log(f'Connection to {db_file}')
     except Error as e:
-        write_log(e)
-        print(e)
+        write_log(f"Database connection error: {e}")
+        print(f"Database connection error: {e}")
     return conn
 
-def create_table(conn, create_table_sql, table_name):
-    """ create a table from the create_table_sql statement
-    :param conn: Connection object
-    :param create_table_sql: a CREATE TABLE statement
-    :return:
+def create_table(conn: sqlite3.Connection, create_table_sql: str, table_name: str) -> bool:
+    """Create a table from the create_table_sql statement.
+    
+    Args:
+        conn: Connection object
+        create_table_sql: CREATE TABLE statement
+        table_name: Name of the table
+        
+    Returns:
+        True if successful, False otherwise
     """
     try:
-        cur = conn.cursor()
-        cur.execute(create_table_sql)
-        write_log('Created table: ' + table_name)
+        c = conn.cursor()
+        c.execute(create_table_sql)
+        write_log(f"Table {table_name} created successfully")
+        return True
     except Error as e:
-        write_log(e)
-        print(e)
-
+        write_log(f"Error creating table {table_name}: {e}")
+        print(f"Error creating table {table_name}: {e}")
+        return False
+    
 def create_all_tables():
     sql_create_tracks_table = """ CREATE TABLE IF NOT EXISTS tracks (
                                     artist_name text,
