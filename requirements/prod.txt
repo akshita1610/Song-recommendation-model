@@ -1,0 +1,5 @@
+# Production dependencies
+-e .[prod]
+
+# Additional production tools
+supervisor>=4.2.0
