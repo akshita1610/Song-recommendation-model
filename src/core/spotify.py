@@ -2,17 +2,24 @@
 
 import asyncio
 import os
+import pickle
+import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Tuple
 import base64
 
 import httpx
+import numpy as np
+import pandas as pd
 import spotipy
 from loguru import logger
 from pydantic import BaseModel, Field, HttpUrl, validator
+from scipy.spatial.distance import cdist
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
+from tqdm import tqdm
 
 from ..exceptions import SpotifyAPIError, DataValidationError
 from ..validators import validate_spotify_uri
@@ -99,34 +106,76 @@ class SpotifyClient:
         self,
         client_id: str,
         client_secret: str,
-        redirect_uri: str = "http://localhost:8888/callback",
-        config: Optional[SpotifyConfig] = None
+        redirect_uri: str,
+        config: Optional[SpotifyConfig] = None,
+        cache_dir: Path = Path("cache"),
+        cache_ttl: int = 3600  # 1 hour
     ):
         """Initialize Spotify client.
         
         Args:
             client_id: Spotify client ID
             client_secret: Spotify client secret
-            redirect_uri: OAuth redirect URI
-            config: Optional configuration object
+            redirect_uri: Spotify redirect URI
+            config: Optional Spotify configuration
+            cache_dir: Directory for caching data
+            cache_ttl: Cache time-to-live in seconds
         """
-        self.config = config or SpotifyConfig(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri
-        )
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.redirect_uri = redirect_uri
+        self.config = config or SpotifyConfig()
+        self.cache_dir = Path(cache_dir)
+        self.cache_ttl = cache_ttl
         
-        self.logger = get_logger(__name__)
+        # Create cache directory
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize Spotify clients
+        # Initialize clients
         self._init_clients()
         
-        # HTTP client for async operations
-        self._http_client = httpx.AsyncClient(timeout=self.config.requests_timeout)
-        
-        # Cache for track data
+        # In-memory caches
         self._track_cache: Dict[str, SpotifyTrack] = {}
         self._features_cache: Dict[str, AudioFeatures] = {}
+        
+        # File-based cache for audio features (from legacy)
+        self._audio_features_cache: Dict[str, Tuple[AudioFeatures, float]] = {}
+    
+    def _get_cache_path(self, cache_key: str) -> Path:
+        """Get cache file path for given key."""
+        return self.cache_dir / f"{cache_key}.pkl"
+    
+    def _is_cache_valid(self, cache_path: Path) -> bool:
+        """Check if cache file is valid and not expired."""
+        if not cache_path.exists():
+            return False
+        
+        file_age = time.time() - cache_path.stat().st_mtime
+        return file_age < self.cache_ttl
+    
+    def _load_from_cache(self, cache_key: str) -> Optional[Any]:
+        """Load data from cache if valid."""
+        cache_path = self._get_cache_path(cache_key)
+        
+        if self._is_cache_valid(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                self.logger.warning(f"Failed to load cache {cache_key}: {e}")
+        
+        return None
+    
+    def _save_to_cache(self, cache_key: str, data: Any) -> None:
+        """Save data to cache."""
+        cache_path = self._get_cache_path(cache_key)
+        
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            with open(cache_path, 'wb') as f:
+                pickle.dump(data, f)
+        except Exception as e:
+            self.logger.warning(f"Failed to save cache {cache_key}: {e}")
     
     def _init_clients(self) -> None:
         """Initialize Spotify OAuth and client credentials managers."""
@@ -464,11 +513,181 @@ class SpotifyClient:
             self.logger.error(f"Error fetching user playlists: {e}")
             raise SpotifyAPIError(f"Failed to fetch user playlists: {e}")
     
+    @lru_cache(maxsize=1000)
+    def get_track_features(self, track_uri: str) -> AudioFeatures:
+        """Get audio features for a track with caching (legacy compatibility).
+        
+        Args:
+            track_uri: Spotify track URI
+            
+        Returns:
+            AudioFeatures object
+        """
+        try:
+            # Extract track ID from URI
+            track_id = track_uri.split(':')[-1]
+            
+            # Check in-memory cache first
+            if track_id in self._features_cache:
+                return self._features_cache[track_id]
+            
+            # Check file cache
+            cached_features = self._load_from_cache(f"features_{track_id}")
+            if cached_features:
+                self._features_cache[track_id] = cached_features
+                return cached_features
+            
+            # Fetch from Spotify
+            features = self._client.audio_features([track_id])
+            if not features or not features[0]:
+                raise SpotifyAPIError(f"No audio features found for track {track_id}")
+            
+            # Convert to AudioFeatures model
+            audio_features = AudioFeatures(**features[0])
+            
+            # Cache the result
+            self._features_cache[track_id] = audio_features
+            self._save_to_cache(f"features_{track_id}", audio_features.dict())
+            
+            return audio_features
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get audio features for {track_uri}: {e}")
+            raise SpotifyAPIError(f"Failed to get audio features: {e}")
+    
+    async def get_multiple_track_features(self, track_uris: List[str]) -> List[AudioFeatures]:
+        """Get audio features for multiple tracks concurrently.
+        
+        Args:
+            track_uris: List of Spotify track URIs
+            
+        Returns:
+            List of AudioFeatures objects
+        """
+        try:
+            if not track_uris:
+                return []
+            
+            # Create tasks for concurrent fetching
+            tasks = []
+            for uri in track_uris:
+                # Check cache first
+                track_id = uri.split(':')[-1]
+                if track_id in self._features_cache:
+                    tasks.append(asyncio.create_task(asyncio.sleep(0, self._features_cache[track_id])))
+                else:
+                    task = asyncio.create_task(self.get_audio_features(track_id))
+                    tasks.append(task)
+            
+            # Wait for all tasks to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Filter out exceptions and return valid results
+            features_list = []
+            for result in results:
+                if isinstance(result, Exception):
+                    self.logger.warning(f"Failed to get features for a track: {result}")
+                elif result is not None:
+                    features_list.append(result)
+            
+            return features_list
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get multiple track features: {e}")
+            raise SpotifyAPIError(f"Failed to get multiple track features: {e}")
+    
+    def calculate_similarity_matrix(
+        self, 
+        track_uris: List[str],
+        feature_weights: Optional[Dict[str, float]] = None
+    ) -> np.ndarray:
+        """Calculate similarity matrix between tracks using audio features.
+        
+        Args:
+            track_uris: List of Spotify track URIs
+            feature_weights: Optional weights for features
+            
+        Returns:
+            Similarity matrix as numpy array
+        """
+        try:
+            if not track_uris:
+                raise DataValidationError("Track URIs list cannot be empty")
+            
+            # Default feature weights
+            if feature_weights is None:
+                feature_weights = {
+                    'danceability': 0.1,
+                    'energy': 0.1,
+                    'key': 0.05,
+                    'loudness': 0.1,
+                    'mode': 0.05,
+                    'speechiness': 0.1,
+                    'acousticness': 0.1,
+                    'instrumentalness': 0.1,
+                    'liveness': 0.05,
+                    'valence': 0.1,
+                    'tempo': 0.1,
+                    'duration_ms': 0.05
+                }
+            
+            # Get audio features for all tracks
+            features_list = []
+            for uri in track_uris:
+                features = self.get_track_features(uri)
+                # Create feature vector
+                feature_vector = np.array([
+                    features.danceability,
+                    features.energy,
+                    features.key / 11.0,  # Normalize key
+                    (features.loudness + 60) / 80.0,  # Normalize loudness
+                    features.mode,
+                    features.speechiness,
+                    features.acousticness,
+                    features.instrumentalness,
+                    features.liveness,
+                    features.valence,
+                    features.tempo / 200.0,  # Normalize tempo
+                    features.duration_ms / 300000.0  # Normalize duration
+                ])
+                
+                # Apply weights
+                weighted_vector = feature_vector * np.array(list(feature_weights.values()))
+                features_list.append(weighted_vector)
+            
+            # Calculate similarity matrix
+            features_matrix = np.array(features_list)
+            similarity_matrix = 1 - cdist(features_matrix, features_matrix, 'cosine')
+            
+            return similarity_matrix
+            
+        except Exception as e:
+            self.logger.error(f"Failed to calculate similarity matrix: {e}")
+            raise SpotifyAPIError(f"Failed to calculate similarity matrix: {e}")
+    
     def clear_cache(self) -> None:
         """Clear all cached data."""
-        self._track_cache.clear()
-        self._features_cache.clear()
-        self.logger.info("Spotify client cache cleared")
+        try:
+            # Clear in-memory caches
+            self._track_cache.clear()
+            self._features_cache.clear()
+            self._audio_features_cache.clear()
+            
+            # Clear file cache
+            if self.cache_dir.exists():
+                for cache_file in self.cache_dir.glob("*.pkl"):
+                    try:
+                        cache_file.unlink()
+                    except Exception as e:
+                        self.logger.warning(f"Failed to delete cache file {cache_file}: {e}")
+            
+            # Clear LRU cache
+            self.get_track_features.cache_clear()
+            
+            self.logger.info("Spotify client cache cleared")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to clear cache: {e}")
     
     async def close(self) -> None:
         """Close HTTP client and cleanup resources."""

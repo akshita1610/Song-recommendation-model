@@ -17,7 +17,7 @@ from src import (
     setup_logging, get_logger,
     SpotifyAPIError, DatabaseError, AuthenticationError
 )
-from src.spotify_client import SpotifyClient
+from src.core.spotify import SpotifyClient
 from src.user_manager import UserManager
 from src.recommendation_engine import RecommendationEngine
 

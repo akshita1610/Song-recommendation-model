@@ -15,7 +15,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from .exceptions import ModelLoadError, PlaylistGenerationError
 from .data_models import Track, AudioFeatures, RecommendationResult, User
-from .spotify_client import SpotifyClient
+from .core.spotify import SpotifyClient
 from .logging_config import get_logger
 
 logger = get_logger(__name__)

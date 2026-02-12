@@ -8,7 +8,6 @@ from .spotify import (
     SpotifyConfig
 )
 
-from ..spotify_client import SpotifyClient as LegacySpotifyClient
 from ..recommendation_engine import RecommendationEngine
 
 __all__ = [
@@ -17,6 +16,5 @@ __all__ = [
     "AudioFeatures",
     "PlaylistInfo",
     "SpotifyConfig",
-    "LegacySpotifyClient",
     "RecommendationEngine",
 ]
