@@ -21,7 +21,8 @@ def validate_spotify_uri(uri: str, uri_type: str = "track") -> bool:
     if not uri or not isinstance(uri, str):
         raise DataValidationError(f"URI must be a non-empty string")
     
-    pattern = f"spotify:{uri_type}:[a-zA-Z0-9]{22}"
+    # More flexible pattern - Spotify IDs can be 22 characters (base62) or variable length
+    pattern = f"spotify:{uri_type}:[a-zA-Z0-9]{{16,22}}"
     if not re.match(pattern, uri):
         raise DataValidationError(f"Invalid Spotify {uri_type} URI format")
     

@@ -15,6 +15,7 @@ class TestValidators:
     
     def test_validate_spotify_uri_valid(self):
         """Test valid Spotify URI validation."""
+        # Use a valid 22-character Spotify ID
         assert validate_spotify_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh", "track")
         assert validate_spotify_uri("spotify:artist:4iV5W9uYEdYUVa79Axb7Rh", "artist")
     
@@ -58,7 +59,7 @@ class TestValidators:
     def test_validate_password_strength_valid(self):
         """Test valid password validation."""
         assert validate_password_strength("StrongPass123")
-        assert validate_password_strength("MySecure@Password")
+        assert validate_password_strength("MySecure@Password123")
     
     def test_validate_password_strength_invalid(self):
         """Test invalid password validation."""

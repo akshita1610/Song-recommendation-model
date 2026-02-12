@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import spotipy
 from loguru import logger
-from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
 from scipy.spatial.distance import cdist
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
@@ -29,6 +29,11 @@ from ..logging_config import get_logger
 class SpotifyTrack(BaseModel):
     """Pydantic model for Spotify track data."""
     
+    model_config = ConfigDict(
+        validate_assignment=True,
+        use_enum_values=True
+    )
+    
     id: str = Field(..., description="Spotify track ID")
     name: str = Field(..., description="Track name")
     artist: str = Field(..., description="Primary artist name")
@@ -37,16 +42,12 @@ class SpotifyTrack(BaseModel):
     duration_ms: int = Field(..., ge=0, description="Duration in milliseconds")
     popularity: int = Field(..., ge=0, le=100, description="Popularity score 0-100")
     
-    @validator('uri')
+    @field_validator('uri')
+    @classmethod
     def validate_spotify_uri_format(cls, v):
         """Validate Spotify URI format."""
         validate_spotify_uri(v, 'track')
         return v
-    
-    class Config:
-        """Pydantic configuration."""
-        validate_assignment = True
-        use_enum_values = True
 
 
 class AudioFeatures(BaseModel):
@@ -66,9 +67,9 @@ class AudioFeatures(BaseModel):
     duration_ms: int = Field(..., ge=0)
     time_signature: int = Field(..., ge=1, le=12)
     
-    class Config:
-        """Pydantic configuration."""
-        validate_assignment = True
+    model_config = ConfigDict(
+        validate_assignment=True
+    )
 
 
 class PlaylistInfo(BaseModel):
@@ -130,6 +131,9 @@ class SpotifyClient:
         
         # Create cache directory
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize logger first
+        self.logger = get_logger(__name__)
         
         # Initialize clients
         self._init_clients()

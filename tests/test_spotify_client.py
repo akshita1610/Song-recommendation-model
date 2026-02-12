@@ -55,16 +55,16 @@ class TestSpotifyClient:
         """Test SpotifyTrack model validation."""
         # Valid track
         track = SpotifyTrack(
-            id="test_id",
+            id="4iV5W9uYEdYUVa79Axb7Rh",
             name="Test Song",
             artist="Test Artist",
             album="Test Album",
-            uri="spotify:track:test_id",
+            uri="spotify:track:4iV5W9uYEdYUVa79Axb7Rh",
             duration_ms=180000,
             popularity=50
         )
         
-        assert track.id == "test_id"
+        assert track.id == "4iV5W9uYEdYUVa79Axb7Rh"
         assert track.name == "Test Song"
         assert track.artist == "Test Artist"
         assert track.duration_ms == 180000
@@ -74,7 +74,7 @@ class TestSpotifyClient:
         """Test SpotifyTrack with invalid URI."""
         with pytest.raises(ValueError):  # Pydantic validation error
             SpotifyTrack(
-                id="test_id",
+                id="4iV5W9uYEdYUVa79Axb7Rh",
                 name="Test Song",
                 artist="Test Artist",
                 album="Test Album",
