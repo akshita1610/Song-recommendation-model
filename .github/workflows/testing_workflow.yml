@@ -33,3 +33,8 @@ jobs:
         file: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
+    
+    # Force cache invalidation
+    - name: Cache status
+      run: |
+        echo "Workflow updated at $(date)"
